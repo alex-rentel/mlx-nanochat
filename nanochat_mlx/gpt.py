@@ -337,15 +337,8 @@ class GPT(nn.Module):
 
     def num_params(self):
         """Count total parameters."""
-        total = 0
-        for k, v in self.parameters().items():
-            if isinstance(v, mx.array):
-                total += v.size
-            elif isinstance(v, dict):
-                for vv in v.values():
-                    if isinstance(vv, mx.array):
-                        total += vv.size
-        return total
+        import mlx.utils
+        return sum(p.size for _, p in mlx.utils.tree_flatten(self.parameters()))
 
     def estimate_flops(self):
         """Estimate FLOPs per token (forward + backward = 6x matmul params)."""

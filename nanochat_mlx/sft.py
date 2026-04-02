@@ -181,12 +181,17 @@ def run_sft(args):
     nparams = sum(p.size for _, p in mlx.utils.tree_flatten(model.parameters()))
     print(f"Total parameters: {nparams:,}")
 
-    # Load SFT data
+    # Load SFT data and split into train/val
+    import random
     conversations = load_smoltalk(max_examples=args.max_examples)
-    print(f"Loaded {len(conversations)} conversations")
+    random.shuffle(conversations)
+    split_idx = int(len(conversations) * 0.9)
+    train_convos = conversations[:split_idx]
+    val_convos = conversations[split_idx:]
+    print(f"SFT split: {len(train_convos)} train, {len(val_convos)} val")
 
     # Create data loader
-    loader = sft_data_loader(tokenizer, conversations, args.device_batch_size, args.max_seq_len)
+    loader = sft_data_loader(tokenizer, train_convos, args.device_batch_size, args.max_seq_len)
 
     # Optimizer - mx.eval below is MLX array materialization, not Python eval
     lr = args.learning_rate
@@ -217,6 +222,18 @@ def run_sft(args):
         if step % 10 == 0:
             tok_per_sec = int(args.device_batch_size * args.max_seq_len / dt)
             print(f"sft step {step:05d}/{args.num_iterations:05d} | loss: {debiased:.4f} | dt: {dt*1000:.0f}ms | tok/s: {tok_per_sec:,}")
+
+        if step > 0 and step % 100 == 0:
+            val_loader_iter = sft_data_loader(tokenizer, val_convos, args.device_batch_size, args.max_seq_len)
+            val_loss = 0.0
+            val_steps = 5
+            for vs in range(val_steps):
+                vx, vy = next(val_loader_iter)
+                vl = model(vx, targets=vy)
+                mx.eval(vl)  # mx.eval materializes MLX lazy arrays
+                val_loss += vl.item()
+            val_loss /= val_steps
+            print(f"sft step {step:05d} | val_loss: {val_loss:.4f}")
 
         if step > 0 and step % args.save_every == 0:
             meta = {"step": step, "model_config": asdict(config), "phase": "sft"}

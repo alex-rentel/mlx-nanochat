@@ -21,6 +21,7 @@ parser.add_argument('--source', type=str, default="sft", choices=["base", "sft"]
 parser.add_argument('--prompt', type=str, default='', help='Single prompt (non-interactive)')
 parser.add_argument('--temperature', type=float, default=0.6, help='Sampling temperature')
 parser.add_argument('--top-k', type=int, default=50, help='Top-k sampling')
+parser.add_argument('--top-p', type=float, default=None, help='Nucleus (top-p) sampling')
 args = parser.parse_args()
 
 tokenizer = get_tokenizer()
@@ -102,7 +103,7 @@ while True:
     print("\nAssistant: ", end="", flush=True)
     for token_column, token_masks in engine.generate(
         conversation_tokens, num_samples=1,
-        max_tokens=256, temperature=args.temperature, top_k=args.top_k
+        max_tokens=256, temperature=args.temperature, top_k=args.top_k, top_p=args.top_p
     ):
         token = token_column[0]
         response_tokens.append(token)

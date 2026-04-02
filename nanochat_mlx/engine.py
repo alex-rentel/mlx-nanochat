@@ -7,10 +7,12 @@ import mlx.core as mx
 import mlx.nn as nn
 
 
-def sample_next_token(logits, temperature=1.0, top_k=None):
+def sample_next_token(logits, temperature=1.0, top_k=None, top_p=None):
     """Sample next token from logits of shape (B, vocab_size). Returns (B, 1)."""
     if temperature == 0.0:
         return mx.argmax(logits, axis=-1, keepdims=True)
+
+    logits = logits / temperature
 
     if top_k is not None and top_k > 0:
         k = min(top_k, logits.shape[-1])
@@ -18,7 +20,18 @@ def sample_next_token(logits, temperature=1.0, top_k=None):
         threshold = vals[:, -1:]
         logits = mx.where(logits >= threshold, logits, mx.array(float('-inf')))
 
-    logits = logits / temperature
+    if top_p is not None and 0.0 < top_p < 1.0:
+        sorted_indices = mx.argsort(logits, axis=-1)[:, ::-1]
+        sorted_logits = mx.take_along_axis(logits, sorted_indices, axis=-1)
+        sorted_probs = mx.softmax(sorted_logits, axis=-1)
+        cumulative = mx.cumsum(sorted_probs, axis=-1)
+        # Mask tokens whose cumulative prob (excluding self) exceeds top_p
+        mask = (cumulative - sorted_probs) > top_p
+        sorted_logits = mx.where(mask, mx.array(float('-inf')), sorted_logits)
+        # Unsort back to original order
+        unsort_indices = mx.argsort(sorted_indices, axis=-1)
+        logits = mx.take_along_axis(sorted_logits, unsort_indices, axis=-1)
+
     return mx.random.categorical(logits, axis=-1)[:, None]
 
 
@@ -31,7 +44,7 @@ class Engine:
         """Materialize MLX lazy arrays (wrapper around mx.eval)."""
         mx.eval(*arrays)
 
-    def generate(self, tokens, num_samples=1, max_tokens=256, temperature=0.6, top_k=50):
+    def generate(self, tokens, num_samples=1, max_tokens=256, temperature=0.6, top_k=50, top_p=None):
         """Generate tokens with KV cache. Yields (token_column, token_masks) per step."""
         assert isinstance(tokens, list) and isinstance(tokens[0], int)
 
@@ -53,7 +66,7 @@ class Engine:
             if all(completed):
                 break
 
-            next_ids = sample_next_token(logits, temperature, top_k)
+            next_ids = sample_next_token(logits, temperature, top_k, top_p)
             self._materialize(next_ids)
             sampled_tokens = next_ids[:, 0].tolist()
 
